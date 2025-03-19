@@ -2,13 +2,15 @@
 const API_URL = 'https://suppliers-api.wildberries.ru';
 const TOKEN = 'eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUwMjE3djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc1ODE3MTY1MCwiaWQiOiIwMTk1YWY1OS1jNDE1LTc0NjYtOWUyZi1lZDcwOWExMWYxYTYiLCJpaWQiOjkxMzY3NDM3LCJvaWQiOjQwNzg3MTIsInMiOjEwNzM3NDQ5NTgsInNpZCI6ImRlNThmYmRmLWE4ZDYtNDU0NS1iOTM2LTU0N2UzZTJkNjRkNSIsInQiOmZhbHNlLCJ1aWQiOjkxMzY3NDM3fQ.HqykgwTwzrinA91xGG63Y6OMgjh2Z0xoq4n-o_YyZJtnw9HU5IpvGaaCPnUOB9TzHGTOYLcYGPDccivIFFWgXQ';
 
+// Прокси-сервер Cloudflare Worker для обхода CORS
+const PROXY_URL = 'https://wildberries-api-proxy.lostyoninternet.workers.dev'; // Замените на ваш домен Cloudflare Worker
+
 // Config для демонстрационного режима
 const config = {
-    // На GitHub Pages пробуем использовать реальный API
-    // Если API недоступен, автоматически переключимся на демо-данные
+    // Всегда использовать реальный API через прокси
     useOnlyMockData: false,
-    // Если true, то для товаров, не найденных в локальной базе, будут использованы случайные демо-данные
-    useFallbackData: true
+    // Использовать демо-данные только при полном отказе API
+    useFallbackData: false
 };
 
 // DOM Elements
@@ -77,96 +79,85 @@ async function searchProduct() {
 }
 
 async function getProductInfo(articleNumber) {
-    if (config.useOnlyMockData) {
-        return getMockedProductInfo(articleNumber);
-    }
-    
     try {
-        // Use the public Wildberries card API to get product information
-        console.log("Запрос данных о товаре через API...");
-        const response = await fetch(`https://card.wb.ru/cards/detail?nm=${articleNumber}`);
+        // Используем прокси для обхода CORS-ограничений
+        const response = await fetch(`${PROXY_URL}?path=v1/detail&nm=${articleNumber}`);
         
-        if (response.ok) {
-            const data = await response.json();
-            if (data.data && data.data.products && data.data.products.length > 0) {
-                console.log("Данные о товаре успешно получены через API");
-                return data.data.products[0];
-            }
+        if (!response.ok) {
+            throw new Error(`API вернул статус ${response.status}`);
         }
         
-        throw new Error('Не удалось получить информацию о товаре');
+        const data = await response.json();
+        
+        if (!data.data || !data.data.products || data.data.products.length === 0) {
+            throw new Error('Товар не найден');
+        }
+        
+        const product = data.data.products[0];
+        console.log('Product info:', product);
+        
+        return {
+            id: product.id || articleNumber,
+            name: product.name || 'Нет данных',
+            brand: product.brand || 'Нет данных',
+            reviewRating: product.reviewRating || 0,
+            feedbacks: product.feedbacks || 0,
+            pics: product.pics || [],
+            colors: product.colors || [],
+            sizes: product.sizes || [],
+            priceU: product.priceU || 0,
+            salePriceU: product.salePriceU || 0
+        };
     } catch (error) {
-        console.error('Error fetching product info:', error.message || 'Unknown error');
-        // После первой ошибки переключаемся на использование только демо-данных
-        console.log("Переключение на демо-режим из-за ошибки API");
-        config.useOnlyMockData = true;
-        return getMockedProductInfo(articleNumber);
+        console.error('Error fetching product info:', error);
+        
+        if (config.useFallbackData) {
+            console.log('Переключение на демо-режим из-за ошибки API');
+            return getMockedProductInfo(articleNumber);
+        } else {
+            throw error;
+        }
     }
 }
 
 async function getProductStats(articleNumber) {
-    if (config.useOnlyMockData) {
-        return getMockedStatsData(articleNumber);
-    }
-    
     try {
-        // Get the current date and date 30 days ago
-        const endDate = getCurrentDate();
-        const startDate = getDateXDaysAgo(30);
+        // Используем прокси для обхода CORS-ограничений
+        const response = await fetch(`${PROXY_URL}?path=nm-report&nm=${articleNumber}&token=${TOKEN}`);
         
-        const requestData = {
-            nmIDs: [parseInt(articleNumber)],
-            period: {
-                start: startDate,
-                end: endDate
-            },
-            timezone: "Europe/Moscow"
-        };
-        
-        // Use the Wildberries API to get statistical data
-        console.log("Запрос статистики товара через API...");
-        const response = await fetch(`${API_URL}/api/v2/nm-report/detail`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': TOKEN
-            },
-            body: JSON.stringify(requestData)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log("Статистика успешно получена через API");
-            
-            // Process the data to match our dashboard format
-            if (data && data.data && data.data.length > 0) {
-                const productStats = data.data[0];
-                
-                // Generate daily sales history based on API data if available
-                const salesHistory = generateSalesHistory(productStats);
-                
-                return {
-                    openCard: productStats.openCard || 0,
-                    addToCart: productStats.addToCart || 0,
-                    orders: productStats.orders || 0,
-                    ordersSumRub: productStats.ordersSumRub || 0,
-                    buyoutCount: productStats.buyoutCount || 0,
-                    buyoutPercent: calculateBuyoutPercent(productStats.orders, productStats.buyoutCount),
-                    conversion: calculateConversion(productStats.openCard, productStats.orders),
-                    stockWbQty: productStats.stockWbQty || 0,
-                    stockMpQty: productStats.stockMpQty || 0,
-                    salesHistory: salesHistory
-                };
-            }
+        if (!response.ok) {
+            throw new Error(`API вернул статус ${response.status}`);
         }
         
-        throw new Error('Не удалось получить статистику товара');
+        const data = await response.json();
+        console.log('Product stats:', data);
+        
+        // Обработка данных статистики
+        const statsData = {
+            orders: data.orders || 0,
+            ordersSumRub: data.ordersSumRub || 0,
+            buyoutPercent: calculateBuyoutPercent(data.orders, data.buyouts) || 0,
+            
+            openCard: data.openCard || 0,
+            addToCart: data.addToCart || 0,
+            conversion: calculateConversion(data.openCard, data.orders) || 0,
+            
+            stockWbQty: data.stockWbQty || 0,
+            stockMpQty: data.stockMpQty || 0,
+            
+            salesHistory: generateSalesHistory(data)
+        };
+        
+        return statsData;
     } catch (error) {
-        console.error('Error fetching product stats:', error.message || 'Unknown error');
-        // После первой ошибки переключаемся на использование только демо-данных
-        console.log("Переключение на демо-режим из-за ошибки API");
-        config.useOnlyMockData = true;
-        return getMockedStatsData(articleNumber);
+        console.error('Error fetching product stats:', error);
+        
+        if (config.useFallbackData) {
+            console.log('Переключение на демо-режим для статистики из-за ошибки API');
+            return getMockedStatsData(articleNumber);
+        } else {
+            throw error;
+        }
     }
 }
 

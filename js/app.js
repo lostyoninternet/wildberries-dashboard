@@ -1,5 +1,5 @@
 // Constants
-const API_URL = 'https://suppliers-stats.wildberries.ru';
+const API_URL = 'https://suppliers-api.wildberries.ru';
 const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev';
 
 // Загрузка токена
@@ -58,16 +58,20 @@ async function getProductInfo(articleNumber) {
         const response = await fetch(`${PROXY_URL}?path=content/v1/cards/filter&token=${TOKEN}`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                filter: {
-                    nmID: parseInt(articleNumber)
-                },
                 sort: {
                     cursor: {
                         limit: 1
                     }
+                },
+                filter: {
+                    nmID: articleNumber
+                },
+                params: {
+                    supplierID: "",
+                    withError: false
                 }
             })
         });
@@ -76,6 +80,7 @@ async function getProductInfo(articleNumber) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+        console.log('API Response:', data);
         
         if (!data || !data.data || !data.data.cards || data.data.cards.length === 0) {
             throw new Error('Товар не найден');

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wildberries Product Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-shopping-bag"></i>
+                <h1>WB Dashboard</h1>
+            </div>
+            <div class="search-form">
+                <div class="input-group">
+                    <input type="text" id="article-input" placeholder="Введите артикул товара">
+                    <button id="search-btn" type="button">Поиск</button>
+                </div>
+                <div class="loader" id="loader"></div>
+            </div>
+        </header>
+
+        <main id="main-content">
+            <div class="welcome-screen" id="welcome-screen">
+                <h2>Добро пожаловать в WB Dashboard</h2>
+                <p>Введите артикул товара Wildberries для получения детальной аналитики</p>
+                <div class="features">
+                    <div class="feature">
+                        <i class="fas fa-chart-line"></i>
+                        <h3>Статистика продаж</h3>
+                        <p>Актуальные данные о продажах и показателях товара</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-tag"></i>
+                        <h3>Цены и скидки</h3>
+                        <p>Информация о текущих ценах и скидках</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-box"></i>
+                        <h3>Остатки</h3>
+                        <p>Данные об остатках товара на складах</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard" id="dashboard" style="display: none;">
+                <div class="product-info">
+                    <div class="product-image">
+                        <img id="product-image" src="" alt="Product Image">
+                    </div>
+                    <div class="product-details">
+                        <h2 id="product-name">Название товара</h2>
+                        <p id="product-brand">Бренд</p>
+                        <p id="product-article">Артикул: <span id="article-value"></span></p>
+                        <div class="price-container">
+                            <div class="price" id="product-price">0 ₽</div>
+                            <div class="discount" id="product-discount">-0%</div>
+                        </div>
+                        <div class="rating">
+                            <div class="stars" id="product-rating"></div>
+                            <span id="reviews-count">(0 отзывов)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-container">
+                    <div class="stats-card">
+                        <h3>Продажи</h3>
+                        <div class="stat-grid">
+                            <div class="stat-item">
+                                <div class="stat-value" id="orders-count">0</div>
+                                <div class="stat-label">Заказов</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="sales-sum">0 ₽</div>
+                                <div class="stat-label">Сумма продаж</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="buyout-percent">0%</div>
+                                <div class="stat-label">% выкупа</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>Статистика просмотров</h3>
+                        <div class="stat-grid">
+                            <div class="stat-item">
+                                <div class="stat-value" id="open-card">0</div>
+                                <div class="stat-label">Просмотры</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="add-to-cart">0</div>
+                                <div class="stat-label">В корзину</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="conversion">0%</div>
+                                <div class="stat-label">Конверсия</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <h3>Остатки на складах</h3>
+                        <div class="stat-grid">
+                            <div class="stat-item">
+                                <div class="stat-value" id="stock-wb">0</div>
+                                <div class="stat-label">WB склад</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value" id="stock-mp">0</div>
+                                <div class="stat-label">МП склад</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <h3>Динамика продаж</h3>
+                        <canvas id="sales-chart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Воронка продаж</h3>
+                        <canvas id="funnel-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="error-message" id="error-message" style="display: none;">
+                <i class="fas fa-exclamation-circle"></i>
+                <p id="error-text">Не удалось получить данные по указанному артикулу</p>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2025 WB Dashboard | Powered by Wildberries API</p>
+        </footer>
+    </div>
+
+    <script src="js/mock-data.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -9,8 +9,8 @@ const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev'; // 
 const config = {
     // Всегда использовать реальный API через прокси
     useOnlyMockData: false,
-    // Использовать демо-данные только при полном отказе API
-    useFallbackData: false
+    // Использовать демо-данные при отказе API
+    useFallbackData: true
 };
 
 // DOM Elements
@@ -81,8 +81,8 @@ async function searchProduct() {
 async function getProductInfo(articleNumber) {
     try {
         // Используем прокси для обхода CORS-ограничений
-        console.log(`Отправка запроса к прокси: ${PROXY_URL}?path=v1/detail&nm=${articleNumber}`);
-        const response = await fetch(`${PROXY_URL}?path=v1/detail&nm=${articleNumber}`);
+        console.log(`Отправка запроса к прокси: ${PROXY_URL}?path=detail&nm=${articleNumber}`);
+        const response = await fetch(`${PROXY_URL}?path=detail&nm=${articleNumber}`);
         
         if (!response.ok) {
             console.error(`API вернул статус ${response.status}`);
@@ -112,6 +112,8 @@ async function getProductInfo(articleNumber) {
             product = data.products[0];
         } else {
             console.error('Товар не найден в ответе API:', data);
+            // Включаем демо-режим, чтобы пользователь мог увидеть хоть какие-то данные
+            config.useFallbackData = true;
             throw new Error('Товар не найден в ответе API');
         }
         

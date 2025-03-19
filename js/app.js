@@ -3,7 +3,7 @@ const API_URL = 'https://suppliers-api.wildberries.ru';
 const TOKEN = 'eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUwMjE3djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc1ODE3MTY1MCwiaWQiOiIwMTk1YWY1OS1jNDE1LTc0NjYtOWUyZi1lZDcwOWExMWYxYTYiLCJpaWQiOjkxMzY3NDM3LCJvaWQiOjQwNzg3MTIsInMiOjEwNzM3NDQ5NTgsInNpZCI6ImRlNThmYmRmLWE4ZDYtNDU0NS1iOTM2LTU0N2UzZTJkNjRkNSIsInQiOmZhbHNlLCJ1aWQiOjkxMzY3NDM3fQ.HqykgwTwzrinA91xGG63Y6OMgjh2Z0xoq4n-o_YyZJtnw9HU5IpvGaaCPnUOB9TzHGTOYLcYGPDccivIFFWgXQ';
 
 // Прокси-сервер Cloudflare Worker для обхода CORS
-const PROXY_URL = 'https://wildberries-api-proxy.lostyoninternet.workers.dev'; // Замените на ваш домен Cloudflare Worker
+const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev'; // URL вашего Worker
 
 // Config для демонстрационного режима
 const config = {

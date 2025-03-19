@@ -43,9 +43,9 @@ async function searchProduct() {
         return;
     }
     
-    showLoader();
-    hideDashboard();
-    hideError();
+    showLoader(true);
+    showDashboard(false);
+    errorMessage.style.display = 'none'; // Скрываем сообщение об ошибке
     
     try {
         let productInfo, productStats;
@@ -67,13 +67,12 @@ async function searchProduct() {
         // Обновление дашборда
         updateDashboard(productInfo, productStats);
         
-        // Показать дашборд
         showDashboard(true);
     } catch (error) {
         console.error('Error fetching product data:', error);
         showError('Не удалось загрузить данные о товаре');
     } finally {
-        hideLoader();
+        showLoader(false);
     }
 }
 

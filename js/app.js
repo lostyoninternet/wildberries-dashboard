@@ -81,20 +81,41 @@ async function searchProduct() {
 async function getProductInfo(articleNumber) {
     try {
         // Используем прокси для обхода CORS-ограничений
+        console.log(`Отправка запроса к прокси: ${PROXY_URL}?path=v1/detail&nm=${articleNumber}`);
         const response = await fetch(`${PROXY_URL}?path=v1/detail&nm=${articleNumber}`);
         
         if (!response.ok) {
+            console.error(`API вернул статус ${response.status}`);
             throw new Error(`API вернул статус ${response.status}`);
         }
         
         const data = await response.json();
+        console.log('Ответ API (полные данные):', data);
         
-        if (!data.data || !data.data.products || data.data.products.length === 0) {
-            throw new Error('Товар не найден');
+        // Проверяем, есть ли данные и имеют ли они ожидаемую структуру
+        if (!data) {
+            console.error('Пустой ответ от API');
+            throw new Error('Нет данных от API');
         }
         
-        const product = data.data.products[0];
-        console.log('Product info:', product);
+        let product;
+        
+        // В зависимости от структуры ответа API, выбираем правильный путь к данным товара
+        if (data.data && data.data.products && data.data.products.length > 0) {
+            // Формат v1/detail API
+            product = data.data.products[0];
+        } else if (data.data && data.data.product) {
+            // Альтернативный формат
+            product = data.data.product;
+        } else if (data.products && data.products.length > 0) {
+            // Еще один возможный формат
+            product = data.products[0];
+        } else {
+            console.error('Товар не найден в ответе API:', data);
+            throw new Error('Товар не найден в ответе API');
+        }
+        
+        console.log('Данные о товаре:', product);
         
         return {
             id: product.id || articleNumber,

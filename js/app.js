@@ -1,5 +1,5 @@
 // Constants
-const API_URL = 'https://suppliers-api.wildberries.ru';
+const API_URL = 'https://suppliers-stats.wildberries.ru';
 const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev';
 
 // Загрузка токена
@@ -29,143 +29,67 @@ searchForm.addEventListener('submit', function(e) {
     searchProduct();
 });
 
-searchButton.addEventListener('click', function() {
+searchButton.addEventListener('click', function(e) {
+    e.preventDefault();
     searchProduct();
 });
 
-// Функция поиска товара
+// Functions
 async function searchProduct() {
-    const articleNumber = articleInput.value.trim();
-    
-    if (!articleNumber) {
+    const article = articleInput.value.trim();
+    if (!article) {
         showError('Введите артикул товара');
         return;
     }
-    
-    showLoader(true);
-    welcomeScreen.style.display = 'none';
-    errorMessage.style.display = 'none';
-    productInfo.style.display = 'none';
-    
+
+    showLoader();
     try {
-        // Получаем данные о товаре через Cloudflare Worker
-        const product = await getProductInfo(articleNumber);
-        
-        if (product) {
-            displayBasicProductInfo(product);
-            productInfo.style.display = 'block';
-        } else {
-            showError('Товар не найден');
-        }
+        const productData = await getProductInfo(article);
+        showProductInfo(productData);
     } catch (error) {
-        console.error('Error fetching product data:', error);
-        showError(error.message || 'Не удалось загрузить данные о товаре');
-    } finally {
-        showLoader(false);
+        showError('Ошибка получения данных о товаре: ' + error.message);
     }
+    hideLoader();
 }
 
-// Получение информации о товаре через Cloudflare Worker
 async function getProductInfo(articleNumber) {
     try {
-        console.log(`Получение данных о товаре по артикулу: ${articleNumber}`);
-        
-        const response = await fetch(`${PROXY_URL}?path=content/v1/cards/filter&token=${TOKEN}&nmID=${articleNumber}`);
-        
+        // Получаем информацию о товаре
+        const response = await fetch(`${PROXY_URL}?path=api/v1/supplier/stocks&token=${TOKEN}&nmID=${articleNumber}`);
         if (!response.ok) {
-            throw new Error(`API вернул статус ${response.status}`);
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
         const data = await response.json();
-        console.log('Полученные данные:', data);
         
-        if (!data || !data.data || !data.data.cards || data.data.cards.length === 0) {
-            return null;
+        if (!data || !data.stocks || data.stocks.length === 0) {
+            throw new Error('Товар не найден');
         }
-        
-        const product = data.data.cards[0];
-        
-        return {
-            name: product.title || product.subjectName || 'Нет данных',
-            brand: product.brand || 'Нет данных',
-            price: product.price || 0,
-            salePrice: product.salePrice || product.price || 0,
-            pic: `https://images.wbstatic.net/c516x688/new/${Math.floor(articleNumber / 10000)}0000/${articleNumber}-1.jpg`,
-            id: articleNumber
-        };
+
+        return data;
     } catch (error) {
         console.error('Error fetching product info:', error);
         throw error;
     }
 }
 
-// Отображение информации о товаре
-function displayBasicProductInfo(product) {
-    productInfo.innerHTML = '';
-    
-    const container = document.createElement('div');
-    container.className = 'basic-product-container';
-    
-    if (product.pic) {
-        const img = document.createElement('img');
-        img.src = product.pic;
-        img.alt = product.name;
-        img.className = 'product-image';
-        container.appendChild(img);
-    }
-    
-    const infoContainer = document.createElement('div');
-    infoContainer.className = 'product-info-container';
-    
-    const nameElement = document.createElement('h2');
-    nameElement.textContent = product.name;
-    infoContainer.appendChild(nameElement);
-    
-    const brandElement = document.createElement('p');
-    brandElement.textContent = `Бренд: ${product.brand}`;
-    brandElement.className = 'product-brand';
-    infoContainer.appendChild(brandElement);
-    
-    const priceContainer = document.createElement('div');
-    priceContainer.className = 'price-container';
-    
-    if (product.salePrice < product.price) {
-        const oldPrice = document.createElement('span');
-        oldPrice.textContent = `${product.price.toLocaleString('ru-RU')} ₽`;
-        oldPrice.className = 'old-price';
-        priceContainer.appendChild(oldPrice);
-        
-        const newPrice = document.createElement('span');
-        newPrice.textContent = `${product.salePrice.toLocaleString('ru-RU')} ₽`;
-        newPrice.className = 'sale-price';
-        priceContainer.appendChild(newPrice);
-        
-        const discount = Math.round(((product.price - product.salePrice) / product.price) * 100);
-        const discountBadge = document.createElement('span');
-        discountBadge.textContent = `-${discount}%`;
-        discountBadge.className = 'discount-badge';
-        priceContainer.appendChild(discountBadge);
-    } else {
-        const price = document.createElement('span');
-        price.textContent = `${product.price.toLocaleString('ru-RU')} ₽`;
-        price.className = 'regular-price';
-        priceContainer.appendChild(price);
-    }
-    
-    infoContainer.appendChild(priceContainer);
-    
-    const articleElement = document.createElement('p');
-    articleElement.textContent = `Артикул: ${product.id}`;
-    articleElement.className = 'product-article';
-    infoContainer.appendChild(articleElement);
-    
-    container.appendChild(infoContainer);
-    productInfo.appendChild(container);
-}
+function showProductInfo(data) {
+    welcomeScreen.style.display = 'none';
+    errorMessage.style.display = 'none';
+    productInfo.style.display = 'block';
 
-// Helper Functions
-function showLoader(show) {
-    loader.style.display = show ? 'block' : 'none';
+    // Форматируем данные для отображения
+    const stock = data.stocks[0];
+    
+    productInfo.innerHTML = `
+        <h2>Информация о товаре</h2>
+        <div class="product-details">
+            <p><strong>Артикул:</strong> ${stock.nmId}</p>
+            <p><strong>Название:</strong> ${stock.subject || 'Нет данных'}</p>
+            <p><strong>Бренд:</strong> ${stock.brand || 'Нет данных'}</p>
+            <p><strong>Остаток:</strong> ${stock.quantity || 0} шт.</p>
+            <p><strong>Доступно для продажи:</strong> ${stock.quantityFull || 0} шт.</p>
+        </div>
+    `;
 }
 
 function showError(message) {
@@ -173,4 +97,14 @@ function showError(message) {
     productInfo.style.display = 'none';
     errorMessage.style.display = 'block';
     errorText.textContent = message;
+}
+
+function showLoader() {
+    loader.style.display = 'block';
+    searchButton.disabled = true;
+}
+
+function hideLoader() {
+    loader.style.display = 'none';
+    searchButton.disabled = false;
 }

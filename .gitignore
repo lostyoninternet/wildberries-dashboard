@@ -1,0 +1,15 @@
+# API токен
+API.txt
+
+# Код для Cloudflare Worker
+cloudflare-worker.js
+
+# Зависимости
+node_modules/
+
+# Логи
+*.log
+
+# Системные файлы
+.DS_Store
+Thumbs.db

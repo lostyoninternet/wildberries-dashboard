@@ -54,27 +54,8 @@ async function searchProduct() {
 
 async function getProductInfo(articleNumber) {
     try {
-        // Получаем информацию о товаре через карточки
-        const response = await fetch(`${PROXY_URL}?path=content/v1/cards/filter&token=${TOKEN}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                sort: {
-                    cursor: {
-                        limit: 1
-                    }
-                },
-                filter: {
-                    nmID: articleNumber
-                },
-                params: {
-                    supplierID: "",
-                    withError: false
-                }
-            })
-        });
+        // Получаем информацию о товаре через публичный API
+        const response = await fetch(`${PROXY_URL}?path=public/api/v1/info&token=${TOKEN}&nm=${articleNumber}`);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -82,11 +63,19 @@ async function getProductInfo(articleNumber) {
         const data = await response.json();
         console.log('API Response:', data);
         
-        if (!data || !data.data || !data.data.cards || data.data.cards.length === 0) {
+        if (!data || data.length === 0) {
             throw new Error('Товар не найден');
         }
 
-        return data.data.cards[0];
+        // Преобразуем данные в нужный формат
+        const product = data[0];
+        return {
+            nmID: articleNumber,
+            title: product.name || 'Нет данных',
+            brand: product.brand || 'Нет данных',
+            price: product.price || 0,
+            discount: product.discount || 0
+        };
     } catch (error) {
         console.error('Error fetching product info:', error);
         throw error;

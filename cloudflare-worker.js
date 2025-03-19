@@ -5,7 +5,7 @@ addEventListener('fetch', event => {
 
 async function handleRequest(request) {
   // Разрешаем только GET-запросы
-  if (request.method !== 'GET') {
+  if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
 
@@ -19,6 +19,9 @@ async function handleRequest(request) {
   const apiPath = url.searchParams.get('path')
   const articleNumber = url.searchParams.get('nm')
   const token = url.searchParams.get('token')
+  const cursor = url.searchParams.get('cursor')
+  const body = url.searchParams.get('body')
+  const skus = url.searchParams.get('skus')
 
   if (!apiPath) {
     return new Response(JSON.stringify({ error: 'Missing required "path" parameter' }), { 
@@ -30,38 +33,86 @@ async function handleRequest(request) {
   let apiUrl = ''
   let headers = {}
   let method = 'GET'
-  let body = null
+  let requestBody = null
 
-  // Определяем, какой эндпоинт API нужно использовать
-  if (apiPath === 'detail') {
-    apiUrl = `https://card.wb.ru/cards/detail?nm=${articleNumber}`
-  } else if (apiPath === 'v1/detail') {
-    apiUrl = `https://card.wb.ru/cards/v1/detail?nm=${articleNumber}`
-  } else if (apiPath === 'nm-report') {
-    apiUrl = 'https://suppliers-api.wildberries.ru/api/v2/nm-report/detail'
+  // Маппинг путей Wildberries API
+  // API Контент
+  if (apiPath === 'content/cards/cursor/list') {
+    apiUrl = `https://suppliers-api.wildberries.ru/content/v1/cards/cursor/list`
+    method = 'GET'
+    headers = {
+      'Authorization': token
+    }
+    
+    // Добавляем курсор, если он есть
+    if (cursor) {
+      apiUrl += `?cursor=${cursor}`
+    }
+  } 
+  else if (apiPath === 'content/cards/filter') {
+    apiUrl = `https://suppliers-api.wildberries.ru/content/v1/cards/filter`
     method = 'POST'
     headers = {
       'Content-Type': 'application/json',
-      'Authorization': token || ''
+      'Authorization': token
     }
     
-    // Подготовка данных для запроса статистики
-    const currentDate = new Date().toISOString().split('T')[0]
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-    
-    body = JSON.stringify({
-      nmIDs: [parseInt(articleNumber)],
-      period: {
-        start: thirtyDaysAgo,
-        end: currentDate
+    // Создаем тело запроса для фильтрации по nmID
+    requestBody = JSON.stringify({
+      filter: {
+        nmID: parseInt(articleNumber)
       },
-      timezone: "Europe/Moscow"
+      sort: {
+        cursor: {
+          limit: 1
+        }
+      }
     })
+  }
+  else if (apiPath === 'content/stocks') {
+    apiUrl = `https://suppliers-api.wildberries.ru/api/v3/stocks/${skus}`
+    method = 'GET'
+    headers = {
+      'Authorization': token
+    }
+  }
+  // API Аналитика
+  else if (apiPath === 'analytics/nm-report') {
+    apiUrl = `https://suppliers-api.wildberries.ru/api/v1/supplier/reportDetailByPeriod`
+    method = 'POST'
+    headers = {
+      'Content-Type': 'application/json',
+      'Authorization': token
+    }
+    
+    // Если передано тело запроса, используем его
+    if (body) {
+      try {
+        requestBody = body
+      } catch (e) {
+        console.error('Failed to parse body:', e)
+      }
+    }
+  }
+  // API Цены и скидки
+  else if (apiPath === 'pricing/getPrices') {
+    apiUrl = `https://suppliers-api.wildberries.ru/public/api/v1/info?supplierArticle=${articleNumber}`
+    method = 'GET'
+    headers = {
+      'Authorization': token
+    }
+  }
+  // Публичные эндпоинты для карточек товаров (legacy, но иногда работают лучше)
+  else if (apiPath === 'detail') {
+    apiUrl = `https://card.wb.ru/cards/detail?nm=${articleNumber}`
+  } 
+  else if (apiPath === 'v1/detail') {
+    apiUrl = `https://card.wb.ru/cards/v1/detail?nm=${articleNumber}`
   }
 
   // Если URL не определен, возвращаем ошибку
   if (!apiUrl) {
-    return new Response(JSON.stringify({ error: 'Invalid API path' }), { 
+    return new Response(JSON.stringify({ error: 'Invalid API path', path: apiPath }), { 
       status: 400,
       headers: corsHeaders()
     })
@@ -74,20 +125,29 @@ async function handleRequest(request) {
     const fetchOptions = {
       method: method,
       headers: headers,
-      body: method === 'POST' ? body : null,
+      body: method === 'POST' ? requestBody : null,
       redirect: 'follow'
     }
     
     const response = await fetch(apiUrl, fetchOptions)
     
-    // Если ответ не успешный, возвращаем ошибку
+    // Если ответ не успешный, логируем и возвращаем ошибку
     if (!response.ok) {
       console.error(`API responded with status: ${response.status}`)
+      
+      // Попробуем прочитать детали ошибки
+      let errorDetails = '';
+      try {
+        const errorText = await response.text();
+        errorDetails = errorText;
+      } catch (e) {}
+      
       return new Response(
         JSON.stringify({ 
           error: `API responded with status: ${response.status}`,
           url: apiUrl,
-          method: method
+          method: method,
+          details: errorDetails
         }), 
         { 
           status: response.status,
@@ -103,6 +163,23 @@ async function handleRequest(request) {
     try {
       data = JSON.parse(responseText)
       console.log('API responded with data structure:', Object.keys(data))
+      
+      // Проверка ответа от открытых API Wildberries
+      if (apiPath === 'detail' || apiPath === 'v1/detail') {
+        if (data && data.data && data.data.products && data.data.products.length === 0) {
+          return new Response(
+            JSON.stringify({ 
+              error: `Товар не найден`,
+              nm: articleNumber
+            }),
+            { 
+              status: 404,
+              headers: corsHeaders()
+            }
+          )
+        }
+      }
+      
     } catch (e) {
       console.error('Failed to parse JSON response:', e)
       return new Response(
@@ -121,7 +198,7 @@ async function handleRequest(request) {
     return new Response(JSON.stringify(data), {
       headers: corsHeaders({
         'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=3600'
+        'Cache-Control': 'public, max-age=60' // Кешируем на 60 секунд
       })
     })
   } catch (error) {

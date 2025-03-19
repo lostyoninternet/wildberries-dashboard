@@ -1,16 +1,24 @@
 // Constants
 const API_URL = 'https://suppliers-api.wildberries.ru';
-const TOKEN = 'eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjUwMjE3djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc1ODE3MTY1MCwiaWQiOiIwMTk1YWY1OS1jNDE1LTc0NjYtOWUyZi1lZDcwOWExMWYxYTYiLCJpaWQiOjkxMzY3NDM3LCJvaWQiOjQwNzg3MTIsInMiOjEwNzM3NDQ5NTgsInNpZCI6ImRlNThmYmRmLWE4ZDYtNDU0NS1iOTM2LTU0N2UzZTJkNjRkNSIsInQiOmZhbHNlLCJ1aWQiOjkxMzY3NDM3fQ.HqykgwTwzrinA91xGG63Y6OMgjh2Z0xoq4n-o_YyZJtnw9HU5IpvGaaCPnUOB9TzHGTOYLcYGPDccivIFFWgXQ';
+const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev';
 
-// Прокси-сервер Cloudflare Worker для обхода CORS
-const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev'; // URL вашего Worker
+// Загрузка токена из файла API.txt
+let TOKEN = null;
+fetch('/API.txt')
+    .then(response => response.text())
+    .then(text => {
+        TOKEN = text.trim();
+        console.log('API токен успешно загружен');
+    })
+    .catch(error => {
+        console.error('Ошибка загрузки токена:', error);
+    });
 
-// Config для демонстрационного режима
+// Config для API
 const config = {
-    // Всегда использовать реальный API через прокси
+    // Никогда не использовать демо-данные
     useOnlyMockData: false,
-    // Использовать демо-данные при отказе API
-    useFallbackData: true
+    useFallbackData: false
 };
 
 // DOM Elements
@@ -36,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Functions
+// Поиск и отображение данных о товаре
 async function searchProduct() {
     const articleNumber = articleInput.value.trim();
     
@@ -45,26 +53,19 @@ async function searchProduct() {
         return;
     }
     
+    if (!TOKEN) {
+        showError('API токен не загружен. Пожалуйста, проверьте файл API.txt и перезагрузите страницу.');
+        return;
+    }
+    
     showLoader(true);
     showDashboard(false);
     errorMessage.style.display = 'none'; // Скрываем сообщение об ошибке
     
     try {
-        let productInfo, productStats;
-        
-        if (window.mockProducts && window.mockProducts[articleNumber]) {
-            console.log(`Использую демо-данные для товара с артикулом ${articleNumber}`);
-            productInfo = formatMockProductInfo(window.mockProducts[articleNumber]);
-            productStats = formatMockProductStats(window.mockProducts[articleNumber].stats);
-        } else if (config.useOnlyMockData) {
-            console.log(`Товар не найден в демо-базе, использую случайные данные`);
-            productInfo = getMockedProductInfo(articleNumber);
-            productStats = getMockedStatsData(articleNumber);
-        } else {
-            // Получение информации о товаре и статистики через API
-            productInfo = await getProductInfo(articleNumber);
-            productStats = await getProductStats(articleNumber);
-        }
+        // Получение информации о товаре и статистики через API
+        const productInfo = await getProductInfo(articleNumber);
+        const productStats = await getProductStats(articleNumber);
         
         // Обновление дашборда
         updateDashboard(productInfo, productStats);
@@ -72,116 +73,228 @@ async function searchProduct() {
         showDashboard(true);
     } catch (error) {
         console.error('Error fetching product data:', error);
-        showError('Не удалось загрузить данные о товаре');
+        showError(error.message || 'Не удалось загрузить данные о товаре');
     } finally {
         showLoader(false);
     }
 }
 
+// Получение информации о товаре через официальный API
 async function getProductInfo(articleNumber) {
     try {
-        // Используем прокси для обхода CORS-ограничений
-        console.log(`Отправка запроса к прокси: ${PROXY_URL}?path=detail&nm=${articleNumber}`);
-        const response = await fetch(`${PROXY_URL}?path=detail&nm=${articleNumber}`);
+        console.log(`Получение данных о товаре по артикулу: ${articleNumber}`);
+        
+        // Используем API для получения карточки товара через прокси
+        const response = await fetch(`${PROXY_URL}?path=content/cards/cursor/list&token=${TOKEN}`);
         
         if (!response.ok) {
-            console.error(`API вернул статус ${response.status}`);
             throw new Error(`API вернул статус ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('Ответ API (полные данные):', data);
+        console.log('Ответ API карточки:', data);
         
-        // Проверяем, есть ли данные и имеют ли они ожидаемую структуру
-        if (!data) {
-            console.error('Пустой ответ от API');
-            throw new Error('Нет данных от API');
+        // Найдем товар по артикулу в списке
+        let product = null;
+        
+        if (data && data.data && data.data.cards) {
+            product = data.data.cards.find(card => card.nmID == articleNumber);
         }
         
-        let product;
-        
-        // В зависимости от структуры ответа API, выбираем правильный путь к данным товара
-        if (data.data && data.data.products && data.data.products.length > 0) {
-            // Формат v1/detail API
-            product = data.data.products[0];
-        } else if (data.data && data.data.product) {
-            // Альтернативный формат
-            product = data.data.product;
-        } else if (data.products && data.products.length > 0) {
-            // Еще один возможный формат
-            product = data.products[0];
-        } else {
-            console.error('Товар не найден в ответе API:', data);
-            // Включаем демо-режим, чтобы пользователь мог увидеть хоть какие-то данные
-            config.useFallbackData = true;
-            throw new Error('Товар не найден в ответе API');
+        if (!product) {
+            // Если товар не найден в первой странице, получим следующую
+            if (data && data.data && data.data.cursor) {
+                const cursor = data.data.cursor.nextPage;
+                if (cursor) {
+                    const nextPageResponse = await fetch(`${PROXY_URL}?path=content/cards/cursor/list&token=${TOKEN}&cursor=${cursor}`);
+                    if (nextPageResponse.ok) {
+                        const nextPageData = await nextPageResponse.json();
+                        if (nextPageData && nextPageData.data && nextPageData.data.cards) {
+                            product = nextPageData.data.cards.find(card => card.nmID == articleNumber);
+                        }
+                    }
+                }
+            }
         }
         
-        console.log('Данные о товаре:', product);
+        if (!product) {
+            // Если товар не найден, попробуем получить его напрямую
+            const directResponse = await fetch(`${PROXY_URL}?path=content/cards/filter&token=${TOKEN}&nmID=${articleNumber}`);
+            if (directResponse.ok) {
+                const directData = await directResponse.json();
+                if (directData && directData.data && directData.data.cards && directData.data.cards.length > 0) {
+                    product = directData.data.cards[0];
+                }
+            }
+        }
         
+        if (!product) {
+            throw new Error(`Товар с артикулом ${articleNumber} не найден`);
+        }
+        
+        console.log('Найденный товар:', product);
+        
+        // Форматируем данные для дашборда
         return {
-            id: product.id || articleNumber,
-            name: product.name || 'Нет данных',
+            id: product.nmID || articleNumber,
+            name: product.title || product.subjectName || 'Нет данных',
             brand: product.brand || 'Нет данных',
-            reviewRating: product.reviewRating || 0,
-            feedbacks: product.feedbacks || 0,
-            pics: product.pics || [],
+            reviewRating: product.rating || 0,
+            feedbacks: product.feedbackCount || 0,
+            pics: product.mediaFiles || [],
             colors: product.colors || [],
             sizes: product.sizes || [],
-            priceU: product.priceU || 0,
-            salePriceU: product.salePriceU || 0
+            priceU: product.price * 100 || 0, // Умножаем на 100 для сохранения формата
+            salePriceU: (product.price - (product.price * (product.discount || 0) / 100)) * 100 || 0
         };
     } catch (error) {
         console.error('Error fetching product info:', error);
-        
-        if (config.useFallbackData) {
-            console.log('Переключение на демо-режим из-за ошибки API');
-            return getMockedProductInfo(articleNumber);
-        } else {
-            throw error;
-        }
+        throw new Error(`Ошибка получения данных о товаре: ${error.message}`);
     }
 }
 
+// Получение статистики товара с API
 async function getProductStats(articleNumber) {
     try {
-        // Используем прокси для обхода CORS-ограничений
-        const response = await fetch(`${PROXY_URL}?path=nm-report&nm=${articleNumber}&token=${TOKEN}`);
+        console.log(`Получение статистики товара по артикулу: ${articleNumber}`);
+        
+        // Используем API для получения статистики через прокси
+        // Получаем текущую дату и дату 30 дней назад
+        const endDate = getCurrentDate();
+        const startDate = getDateXDaysAgo(30);
+        
+        const requestData = {
+            dateFrom: startDate,
+            dateTo: endDate,
+            dimension: "nmId",
+            limit: 1000,
+            offset: 0,
+            filters: {
+                nmId: parseInt(articleNumber)
+            }
+        };
+        
+        // Запрос к API аналитики
+        const requestUrl = `${PROXY_URL}?path=analytics/nm-report&token=${TOKEN}&body=${encodeURIComponent(JSON.stringify(requestData))}`;
+        console.log('Запрос к API аналитики:', requestUrl);
+        
+        const response = await fetch(requestUrl);
         
         if (!response.ok) {
-            throw new Error(`API вернул статус ${response.status}`);
+            throw new Error(`API аналитики вернул статус ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('Product stats:', data);
+        console.log('Ответ API аналитики:', data);
         
-        // Обработка данных статистики
+        // Проверяем наличие данных
+        if (!data || !data.data || !data.data.length) {
+            throw new Error('Данные о статистике товара не найдены');
+        }
+        
+        // Обрабатываем данные для дашборда
         const statsData = {
-            orders: data.orders || 0,
-            ordersSumRub: data.ordersSumRub || 0,
-            buyoutPercent: calculateBuyoutPercent(data.orders, data.buyouts) || 0,
-            
-            openCard: data.openCard || 0,
-            addToCart: data.addToCart || 0,
-            conversion: calculateConversion(data.openCard, data.orders) || 0,
-            
-            stockWbQty: data.stockWbQty || 0,
-            stockMpQty: data.stockMpQty || 0,
-            
-            salesHistory: generateSalesHistory(data)
+            orders: 0,
+            ordersSumRub: 0,
+            buyoutPercent: 0,
+            openCard: 0,
+            addToCart: 0,
+            conversion: 0,
+            stockWbQty: 0,
+            stockMpQty: 0,
+            salesHistory: []
         };
         
+        // Суммируем данные по всем записям
+        data.data.forEach(item => {
+            statsData.orders += item.orderCount || 0;
+            statsData.ordersSumRub += item.orderSumRub || 0;
+            statsData.openCard += item.openCardCount || 0;
+            statsData.addToCart += item.addToCartCount || 0;
+        });
+        
+        // Рассчитываем производные показатели
+        statsData.buyoutPercent = calculateBuyoutPercent(statsData.orders, data.data.reduce((sum, item) => sum + (item.buyoutsCount || 0), 0));
+        statsData.conversion = calculateConversion(statsData.openCard, statsData.orders);
+        
+        // Получаем данные об остатках
+        const stockResponse = await fetch(`${PROXY_URL}?path=content/stocks&token=${TOKEN}&skus=${articleNumber}`);
+        if (stockResponse.ok) {
+            const stockData = await stockResponse.json();
+            console.log('Данные об остатках:', stockData);
+            
+            if (stockData && stockData.data && stockData.data.length > 0) {
+                const stock = stockData.data[0];
+                statsData.stockWbQty = stock.wbQuantity || 0;
+                statsData.stockMpQty = stock.quantity || 0;
+            }
+        }
+        
+        // Формируем историю продаж
+        if (data.data && data.data.length > 0) {
+            const sortedData = [...data.data].sort((a, b) => new Date(a.date) - new Date(b.date));
+            statsData.salesHistory = sortedData.map(item => ({
+                date: item.date,
+                orderCount: item.orderCount || 0,
+                orderSum: item.orderSumRub || 0
+            }));
+        } else {
+            // Если нет данных для истории, создаем пустую историю
+            for (let i = 0; i < 30; i++) {
+                statsData.salesHistory.push({
+                    date: getDateXDaysAgo(29 - i),
+                    orderCount: 0,
+                    orderSum: 0
+                });
+            }
+        }
+        
+        console.log('Сформированные данные о статистике:', statsData);
         return statsData;
     } catch (error) {
         console.error('Error fetching product stats:', error);
+        // Создаем базовую статистику с нулевыми значениями
+        const emptyStats = {
+            orders: 0,
+            ordersSumRub: 0,
+            buyoutPercent: 0,
+            openCard: 0,
+            addToCart: 0,
+            conversion: 0,
+            stockWbQty: 0,
+            stockMpQty: 0,
+            salesHistory: []
+        };
         
-        if (config.useFallbackData) {
-            console.log('Переключение на демо-режим для статистики из-за ошибки API');
-            return getMockedStatsData(articleNumber);
-        } else {
-            throw error;
+        // Создаем пустую историю продаж
+        for (let i = 0; i < 30; i++) {
+            emptyStats.salesHistory.push({
+                date: getDateXDaysAgo(29 - i),
+                orderCount: 0,
+                orderSum: 0
+            });
         }
+        
+        return emptyStats;
     }
+}
+
+// Helper Functions
+function showLoader(show) {
+    loader.style.display = show ? 'block' : 'none';
+}
+
+function showDashboard(show) {
+    welcomeScreen.style.display = show ? 'none' : 'block';
+    dashboard.style.display = show ? 'block' : 'none';
+    errorMessage.style.display = 'none';
+}
+
+function showError(message) {
+    welcomeScreen.style.display = 'none';
+    dashboard.style.display = 'none';
+    errorMessage.style.display = 'block';
+    errorText.textContent = message;
 }
 
 function updateDashboard(productData, statsData) {
@@ -361,24 +474,6 @@ function updateFunnelChart(statsData) {
     });
 }
 
-// Helper Functions
-function showLoader(show) {
-    loader.style.display = show ? 'block' : 'none';
-}
-
-function showDashboard(show) {
-    welcomeScreen.style.display = show ? 'none' : 'block';
-    dashboard.style.display = show ? 'block' : 'none';
-    errorMessage.style.display = 'none';
-}
-
-function showError(message) {
-    welcomeScreen.style.display = 'none';
-    dashboard.style.display = 'none';
-    errorMessage.style.display = 'block';
-    errorText.textContent = message;
-}
-
 function formatNumber(num) {
     return num.toLocaleString('ru-RU');
 }
@@ -402,172 +497,12 @@ function getDateXDaysAgo(days) {
     return date.toISOString().split('T')[0];
 }
 
-// Helper function to generate sales history
-function generateSalesHistory(productStats) {
-    // If we have daily data from API
-    if (productStats.dailyData && Array.isArray(productStats.dailyData) && productStats.dailyData.length > 0) {
-        return productStats.dailyData.map(day => ({
-            date: new Date(day.date).toLocaleDateString('ru-RU'),
-            orderCount: day.orders || 0,
-            orderSum: day.ordersSumRub || 0
-        }));
-    }
-    
-    // If no daily data, use mock data with realistic scaling based on the overall stats
-    const salesHistory = [];
-    const totalOrders = productStats.orders || Math.floor(Math.random() * 500) + 100;
-    const totalSum = productStats.ordersSumRub || totalOrders * 2000;
-    
-    // Distribute the total over 14 days with some randomness
-    for (let i = 14; i > 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        
-        // Random distribution factor
-        const factor = 0.5 + Math.random();
-        const dayShare = factor / 14;
-        
-        const orderCount = Math.max(1, Math.floor(totalOrders * dayShare));
-        const orderSum = Math.max(100, Math.floor(totalSum * dayShare));
-        
-        salesHistory.push({
-            date: date.toLocaleDateString('ru-RU'),
-            orderCount: orderCount,
-            orderSum: orderSum
-        });
-    }
-    
-    return salesHistory;
-}
-
-// Helper function to calculate buyout percent
 function calculateBuyoutPercent(orders, buyoutCount) {
     if (!orders || orders === 0) return 0;
     return Math.round((buyoutCount / orders) * 100);
 }
 
-// Helper function to calculate conversion
 function calculateConversion(openCard, orders) {
     if (!openCard || openCard === 0) return 0;
     return Math.round((orders / openCard) * 100);
-}
-
-// Форматирование данных о товаре из наших демо-данных
-function formatMockProductInfo(mockProduct) {
-    return {
-        imt_id: mockProduct.id,
-        nm_id: mockProduct.id,
-        name: mockProduct.name,
-        brand: mockProduct.brand,
-        priceU: mockProduct.priceU,
-        salePriceU: mockProduct.salePriceU,
-        reviewRating: mockProduct.reviewRating,
-        feedbacks: mockProduct.feedbacks,
-        pics: mockProduct.pics,
-        colors: [{name: "Стандартный"}]
-    };
-}
-
-// Форматирование статистики из наших демо-данных
-function formatMockProductStats(statsData) {
-    // Генерируем историю продаж на основе данных dailyData
-    const salesHistory = statsData.dailyData.length > 0 
-        ? statsData.dailyData.map(day => ({
-            date: new Date(day.date).toLocaleDateString('ru-RU'),
-            orderCount: day.orders || 0,
-            orderSum: day.ordersSumRub || 0
-        }))
-        : generateSalesHistoryFromTotals(statsData);
-    
-    return {
-        openCard: statsData.openCard || 0,
-        addToCart: statsData.addToCart || 0,
-        orders: statsData.orders || 0,
-        ordersSumRub: statsData.ordersSumRub || 0,
-        buyoutCount: statsData.buyoutCount || 0,
-        buyoutPercent: calculateBuyoutPercent(statsData.orders, statsData.buyoutCount),
-        conversion: calculateConversion(statsData.openCard, statsData.orders),
-        stockWbQty: statsData.stockWbQty || 0,
-        stockMpQty: statsData.stockMpQty || 0,
-        salesHistory: salesHistory
-    };
-}
-
-// Генерация истории продаж на основе суммарных показателей
-function generateSalesHistoryFromTotals(statsData) {
-    const salesHistory = [];
-    const totalOrders = statsData.orders || Math.floor(Math.random() * 500) + 100;
-    const totalSum = statsData.ordersSumRub || totalOrders * 2000;
-    
-    // Distribute the total over 14 days with some randomness
-    for (let i = 14; i > 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        
-        // Random distribution factor
-        const factor = 0.5 + Math.random();
-        const dayShare = factor / 14;
-        
-        const orderCount = Math.max(1, Math.floor(totalOrders * dayShare));
-        const orderSum = Math.max(100, Math.floor(totalSum * dayShare));
-        
-        salesHistory.push({
-            date: date.toLocaleDateString('ru-RU'),
-            orderCount: orderCount,
-            orderSum: orderSum
-        });
-    }
-    
-    return salesHistory;
-}
-
-// Mock Data (for demo purposes)
-function getMockedProductInfo(articleNumber) {
-    return {
-        id: parseInt(articleNumber),
-        name: 'Демонстрационный товар Wildberries',
-        brand: 'Demo Brand',
-        priceU: 299900,
-        salePriceU: 199900,
-        reviewRating: 4.7,
-        feedbacks: 128,
-        pics: [1, 2, 3]
-    };
-}
-
-function getMockedStatsData(articleNumber) {
-    // Generate random sales history for the last 14 days
-    const salesHistory = [];
-    for (let i = 14; i > 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        
-        const orderCount = Math.floor(Math.random() * 50) + 10;
-        const orderSum = orderCount * (Math.floor(Math.random() * 1000) + 1000);
-        
-        salesHistory.push({
-            date: date.toLocaleDateString('ru-RU'),
-            orderCount: orderCount,
-            orderSum: orderSum
-        });
-    }
-    
-    // Funnel stats
-    const openCard = Math.floor(Math.random() * 5000) + 2000;
-    const addToCart = Math.floor(openCard * (Math.random() * 0.3 + 0.1));
-    const orders = Math.floor(addToCart * (Math.random() * 0.5 + 0.3));
-    const buyoutCount = Math.floor(orders * (Math.random() * 0.3 + 0.6));
-    
-    return {
-        openCard: openCard,
-        addToCart: addToCart,
-        orders: orders,
-        ordersSumRub: salesHistory.reduce((sum, item) => sum + item.orderSum, 0),
-        buyoutCount: buyoutCount,
-        buyoutPercent: Math.round((buyoutCount / orders) * 100),
-        conversion: Math.round((orders / openCard) * 100),
-        stockWbQty: Math.floor(Math.random() * 500) + 100,
-        stockMpQty: Math.floor(Math.random() * 300) + 50,
-        salesHistory: salesHistory
-    };
 }

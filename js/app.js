@@ -54,18 +54,34 @@ async function searchProduct() {
 
 async function getProductInfo(articleNumber) {
     try {
-        // Получаем информацию о товаре
-        const response = await fetch(`${PROXY_URL}?path=api/v1/supplier/stocks&token=${TOKEN}&nmID=${articleNumber}`);
+        // Получаем информацию о товаре через карточки
+        const response = await fetch(`${PROXY_URL}?path=content/v1/cards/filter&token=${TOKEN}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filter: {
+                    nmID: parseInt(articleNumber)
+                },
+                sort: {
+                    cursor: {
+                        limit: 1
+                    }
+                }
+            })
+        });
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
         
-        if (!data || !data.stocks || data.stocks.length === 0) {
+        if (!data || !data.data || !data.data.cards || data.data.cards.length === 0) {
             throw new Error('Товар не найден');
         }
 
-        return data;
+        return data.data.cards[0];
     } catch (error) {
         console.error('Error fetching product info:', error);
         throw error;
@@ -78,16 +94,14 @@ function showProductInfo(data) {
     productInfo.style.display = 'block';
 
     // Форматируем данные для отображения
-    const stock = data.stocks[0];
-    
     productInfo.innerHTML = `
         <h2>Информация о товаре</h2>
         <div class="product-details">
-            <p><strong>Артикул:</strong> ${stock.nmId}</p>
-            <p><strong>Название:</strong> ${stock.subject || 'Нет данных'}</p>
-            <p><strong>Бренд:</strong> ${stock.brand || 'Нет данных'}</p>
-            <p><strong>Остаток:</strong> ${stock.quantity || 0} шт.</p>
-            <p><strong>Доступно для продажи:</strong> ${stock.quantityFull || 0} шт.</p>
+            <p><strong>Артикул:</strong> ${data.nmID}</p>
+            <p><strong>Название:</strong> ${data.title || data.subjectName || 'Нет данных'}</p>
+            <p><strong>Бренд:</strong> ${data.brand || 'Нет данных'}</p>
+            <p><strong>Цена:</strong> ${data.price || 0} ₽</p>
+            <p><strong>Скидка:</strong> ${data.discount || 0}%</p>
         </div>
     `;
 }

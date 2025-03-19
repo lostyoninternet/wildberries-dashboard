@@ -54,8 +54,7 @@ async function searchProduct() {
 
 async function getProductInfo(articleNumber) {
     try {
-        // Получаем информацию о товаре через публичный API
-        const response = await fetch(`${PROXY_URL}?path=public/api/v1/info&token=${TOKEN}&nm=${articleNumber}`);
+        const response = await fetch(`${PROXY_URL}?nm=${articleNumber}`);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -63,18 +62,17 @@ async function getProductInfo(articleNumber) {
         const data = await response.json();
         console.log('API Response:', data);
         
-        if (!data || data.length === 0) {
+        if (!data || !data.data || !data.data.products || data.data.products.length === 0) {
             throw new Error('Товар не найден');
         }
 
-        // Преобразуем данные в нужный формат
-        const product = data[0];
+        const product = data.data.products[0];
         return {
-            nmID: articleNumber,
+            nmID: product.id,
             title: product.name || 'Нет данных',
             brand: product.brand || 'Нет данных',
-            price: product.price || 0,
-            discount: product.discount || 0
+            price: product.salePriceU ? (product.salePriceU / 100) : 0,
+            discount: product.sale || 0
         };
     } catch (error) {
         console.error('Error fetching product info:', error);

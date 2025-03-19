@@ -2,17 +2,8 @@
 const API_URL = 'https://suppliers-api.wildberries.ru';
 const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev';
 
-// Загрузка токена из файла API.txt
-let TOKEN = null;
-fetch('API.txt')
-    .then(response => response.text())
-    .then(text => {
-        TOKEN = text.trim();
-        console.log('API токен успешно загружен');
-    })
-    .catch(error => {
-        console.error('Ошибка загрузки токена:', error);
-    });
+// Загрузка токена
+let TOKEN = localStorage.getItem('wb_api_token');
 
 // DOM Elements
 const searchForm = document.getElementById('search-form');
@@ -23,6 +14,14 @@ const welcomeScreen = document.getElementById('welcome-screen');
 const errorMessage = document.getElementById('error-message');
 const errorText = document.getElementById('error-text');
 const productInfo = document.getElementById('product-info');
+
+// Проверяем наличие токена
+if (!TOKEN) {
+    TOKEN = prompt('Пожалуйста, введите ваш API токен Wildberries:');
+    if (TOKEN) {
+        localStorage.setItem('wb_api_token', TOKEN);
+    }
+}
 
 // Event Listeners
 searchForm.addEventListener('submit', function(e) {

@@ -54,25 +54,34 @@ async function searchProduct() {
 
 async function getProductInfo(articleNumber) {
     try {
-        const response = await fetch(`${PROXY_URL}?path=wb/card&nm=${articleNumber}`);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        // Получаем основную информацию о товаре
+        const cardResponse = await fetch(`${PROXY_URL}?path=wb/card&nm=${articleNumber}`);
+        if (!cardResponse.ok) {
+            throw new Error(`HTTP error! status: ${cardResponse.status}`);
         }
-        const data = await response.json();
-        console.log('API Response:', data);
+        const cardData = await cardResponse.json();
+        console.log('Card API Response:', cardData);
         
-        if (!data || !data.data || !data.data.products || data.data.products.length === 0) {
+        if (!cardData || !cardData.data || !cardData.data.products || cardData.data.products.length === 0) {
             throw new Error('Товар не найден');
         }
 
-        const product = data.data.products[0];
+        // Получаем историю цен
+        const historyResponse = await fetch(`${PROXY_URL}?path=wb/price-history&nm=${articleNumber}`);
+        if (!historyResponse.ok) {
+            throw new Error(`HTTP error! status: ${historyResponse.status}`);
+        }
+        const historyData = await historyResponse.json();
+        console.log('History API Response:', historyData);
+
+        const product = cardData.data.products[0];
         return {
             nmID: product.id,
             title: product.name || 'Нет данных',
             brand: product.brand || 'Нет данных',
             price: product.salePriceU ? (product.salePriceU / 100) : 0,
-            discount: product.sale || 0
+            discount: product.sale || 0,
+            priceHistory: historyData || []
         };
     } catch (error) {
         console.error('Error fetching product info:', error);
@@ -86,15 +95,43 @@ function showProductInfo(data) {
     productInfo.style.display = 'block';
 
     // Форматируем данные для отображения
+    let historyHtml = '';
+    if (data.priceHistory && data.priceHistory.length > 0) {
+        historyHtml = `
+            <div class="price-history">
+                <h3>История цен</h3>
+                <table class="price-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Цена</th>
+                            <th>Скидка</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.priceHistory.map(item => `
+                            <tr>
+                                <td>${new Date(item.dt * 1000).toLocaleDateString()}</td>
+                                <td>${(item.price / 100).toFixed(2)} ₽</td>
+                                <td>${item.discount || 0}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
     productInfo.innerHTML = `
         <h2>Информация о товаре</h2>
         <div class="product-details">
             <p><strong>Артикул:</strong> ${data.nmID}</p>
-            <p><strong>Название:</strong> ${data.title || data.subjectName || 'Нет данных'}</p>
-            <p><strong>Бренд:</strong> ${data.brand || 'Нет данных'}</p>
-            <p><strong>Цена:</strong> ${data.price || 0} ₽</p>
-            <p><strong>Скидка:</strong> ${data.discount || 0}%</p>
+            <p><strong>Название:</strong> ${data.title}</p>
+            <p><strong>Бренд:</strong> ${data.brand}</p>
+            <p><strong>Текущая цена:</strong> ${data.price} ₽</p>
+            <p><strong>Скидка:</strong> ${data.discount}%</p>
         </div>
+        ${historyHtml}
     `;
 }
 

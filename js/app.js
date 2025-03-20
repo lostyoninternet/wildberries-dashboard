@@ -68,11 +68,14 @@ async function getProductInfo(articleNumber) {
 
         // Получаем историю цен
         const historyResponse = await fetch(`${PROXY_URL}?path=wb/price-history&nm=${articleNumber}`);
-        if (!historyResponse.ok) {
-            throw new Error(`HTTP error! status: ${historyResponse.status}`);
+        let priceHistory = [];
+        if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            console.log('History API Response:', historyData);
+            if (Array.isArray(historyData)) {
+                priceHistory = historyData;
+            }
         }
-        const historyData = await historyResponse.json();
-        console.log('History API Response:', historyData);
 
         const product = cardData.data.products[0];
         return {
@@ -81,7 +84,7 @@ async function getProductInfo(articleNumber) {
             brand: product.brand || 'Нет данных',
             price: product.salePriceU ? (product.salePriceU / 100) : 0,
             discount: product.sale || 0,
-            priceHistory: historyData || []
+            priceHistory: priceHistory
         };
     } catch (error) {
         console.error('Error fetching product info:', error);
@@ -97,6 +100,9 @@ function showProductInfo(data) {
     // Форматируем данные для отображения
     let historyHtml = '';
     if (data.priceHistory && data.priceHistory.length > 0) {
+        // Сортируем историю цен по дате (от новых к старым)
+        const sortedHistory = [...data.priceHistory].sort((a, b) => b.dt - a.dt);
+        
         historyHtml = `
             <div class="price-history">
                 <h3>История цен</h3>
@@ -109,7 +115,7 @@ function showProductInfo(data) {
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.priceHistory.map(item => `
+                        ${sortedHistory.map(item => `
                             <tr>
                                 <td>${new Date(item.dt * 1000).toLocaleDateString()}</td>
                                 <td>${(item.price / 100).toFixed(2)} ₽</td>
@@ -120,6 +126,8 @@ function showProductInfo(data) {
                 </table>
             </div>
         `;
+    } else {
+        historyHtml = '<p>История цен недоступна</p>';
     }
 
     productInfo.innerHTML = `

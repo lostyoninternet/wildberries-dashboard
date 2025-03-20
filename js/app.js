@@ -54,7 +54,7 @@ async function searchProduct() {
 
 async function getProductInfo(articleNumber) {
     try {
-        const response = await fetch(`${PROXY_URL}?nm=${articleNumber}`);
+        const response = await fetch(`${PROXY_URL}?path=wb/card&nm=${articleNumber}`);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

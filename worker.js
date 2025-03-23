@@ -1,22 +1,34 @@
 // Конфигурация API
 const API_CONFIG = {
     endpoints: {
-        'wb/card': {
-            url: 'https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=0',
-            method: 'GET',
-            transform: (nm) => `&nm=${nm}`
+        // Content API
+        'content/cards': {
+            url: 'https://suppliers-api.wildberries.ru/content/v2/cards/list',
+            method: 'POST',
+            headers: (key) => ({
+                'Authorization': key,
+                'Content-Type': 'application/json'
+            })
         },
-        'wb/price-history': {
-            url: 'https://basket-01.wb.ru/vol',
-            method: 'GET',
-            transform: (nm) => {
-                const vol = Math.floor(nm / 1e5);
-                const part = Math.floor(nm / 1e3);
-                return `${vol}/part${part}/${nm}.json`;
-            }
-        },
-        'api/stats': {
+        // Statistics API
+        'statistics/sales': {
             url: 'https://statistics-api.wildberries.ru/api/v1/supplier/sales',
+            method: 'GET',
+            headers: (key) => ({
+                'Authorization': key
+            })
+        },
+        // Statistics API - детальная статистика
+        'statistics/sales/detail': {
+            url: 'https://statistics-api.wildberries.ru/api/v1/supplier/sales/detail',
+            method: 'GET',
+            headers: (key) => ({
+                'Authorization': key
+            })
+        },
+        // Statistics API - остатки
+        'statistics/stocks': {
+            url: 'https://statistics-api.wildberries.ru/api/v1/supplier/stocks',
             method: 'GET',
             headers: (key) => ({
                 'Authorization': key
@@ -69,83 +81,106 @@ const apiUtils = {
 
 // Обработчики различных типов запросов
 const handlers = {
-    async 'wb/card'(params) {
-        const { nm } = params;
-        if (!nm) {
-            throw new Error('Параметр nm обязателен');
+    // Получение информации о товарах
+    async 'content/cards'(params) {
+        const { key, nm } = params;
+        if (!key || !nm) {
+            throw new Error('Параметры key и nm обязательны');
         }
 
-        const endpoint = API_CONFIG.endpoints['wb/card'];
-        const url = `${endpoint.url}${endpoint.transform(nm)}`;
-        
-        const response = await fetch(url);
+        const endpoint = API_CONFIG.endpoints['content/cards'];
+        const response = await fetch(endpoint.url, {
+            method: endpoint.method,
+            headers: endpoint.headers(key),
+            body: JSON.stringify({
+                vendorCodes: [nm],
+                allowedCategoriesIds: []
+            })
+        });
+
         if (!response.ok) {
-            throw new Error(`Ошибка получения карточки товара: ${response.status}`);
+            throw new Error(`Ошибка получения информации о товаре: ${response.status}`);
         }
 
         const data = await response.json();
-        if (!data.data || !data.data.products || data.data.products.length === 0) {
-            throw new Error('Товар не найден');
-        }
-
-        return data;
+        return { data };
     },
 
-    async 'wb/price-history'(params) {
-        const { nm } = params;
-        if (!nm) {
-            throw new Error('Параметр nm обязателен');
-        }
-
-        const endpoint = API_CONFIG.endpoints['wb/price-history'];
-        const url = `${endpoint.url}/${endpoint.transform(nm)}`;
-        
-        console.log('Price history URL:', url);
-        
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                if (response.status === 404) {
-                    // Если история цен не найдена, возвращаем пустой массив
-                    return { data: [] };
-                }
-                throw new Error(`Ошибка получения истории цен: ${response.status}`);
-            }
-
-            const data = await response.json();
-            return { data };
-        } catch (error) {
-            console.error('Price history error:', error);
-            // Если произошла ошибка, возвращаем пустой массив
-            return { data: [] };
-        }
-    },
-
-    async 'api/stats'(params) {
+    // Получение статистики продаж
+    async 'statistics/sales'(params) {
         const { key, nm, dateFrom, dateTo } = params;
-        
-        // Для статистики нужен API ключ
-        apiUtils.validateApiKey(key);
-        
-        if (!nm || !dateFrom || !dateTo) {
-            throw new Error('Параметры nm, dateFrom и dateTo обязательны');
+        if (!key || !dateFrom || !dateTo) {
+            throw new Error('Параметры key, dateFrom и dateTo обязательны');
         }
 
-        const endpoint = API_CONFIG.endpoints['api/stats'];
+        const endpoint = API_CONFIG.endpoints['statistics/sales'];
         const url = new URL(endpoint.url);
-        url.searchParams.set('nm', nm);
         url.searchParams.set('dateFrom', dateFrom);
         url.searchParams.set('dateTo', dateTo);
+        if (nm) {
+            url.searchParams.set('nmId', nm);
+        }
 
         const response = await fetch(url.toString(), {
             headers: endpoint.headers(key)
         });
 
         if (!response.ok) {
-            throw new Error(`Ошибка получения статистики: ${response.status}`);
+            throw new Error(`Ошибка получения статистики продаж: ${response.status}`);
         }
 
-        return response.json();
+        const data = await response.json();
+        return { data };
+    },
+
+    // Получение детальной статистики продаж
+    async 'statistics/sales/detail'(params) {
+        const { key, nm, dateFrom, dateTo } = params;
+        if (!key || !dateFrom || !dateTo) {
+            throw new Error('Параметры key, dateFrom и dateTo обязательны');
+        }
+
+        const endpoint = API_CONFIG.endpoints['statistics/sales/detail'];
+        const url = new URL(endpoint.url);
+        url.searchParams.set('dateFrom', dateFrom);
+        url.searchParams.set('dateTo', dateTo);
+        if (nm) {
+            url.searchParams.set('nmId', nm);
+        }
+
+        const response = await fetch(url.toString(), {
+            headers: endpoint.headers(key)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ошибка получения детальной статистики: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return { data };
+    },
+
+    // Получение информации об остатках
+    async 'statistics/stocks'(params) {
+        const { key, dateFrom } = params;
+        if (!key || !dateFrom) {
+            throw new Error('Параметры key и dateFrom обязательны');
+        }
+
+        const endpoint = API_CONFIG.endpoints['statistics/stocks'];
+        const url = new URL(endpoint.url);
+        url.searchParams.set('dateFrom', dateFrom);
+
+        const response = await fetch(url.toString(), {
+            headers: endpoint.headers(key)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ошибка получения информации об остатках: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return { data };
     }
 };
 

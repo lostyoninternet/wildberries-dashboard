@@ -7,9 +7,13 @@ const API_CONFIG = {
             transform: (nm) => `&nm=${nm}`
         },
         'wb/price-history': {
-            url: 'https://basket-10.wb.ru/vol',
+            url: 'https://basket-01.wb.ru/vol',
             method: 'GET',
-            transform: (nm) => `${Math.floor(nm / 100000)}/part${Math.floor(nm / 1000)}/cards/${nm}.json`
+            transform: (nm) => {
+                const vol = Math.floor(nm / 1e5);
+                const part = Math.floor(nm / 1e3);
+                return `${vol}/part${part}/${nm}.json`;
+            }
         },
         'api/stats': {
             url: 'https://statistics-api.wildberries.ru/api/v1/supplier/sales',
@@ -96,12 +100,25 @@ const handlers = {
         const endpoint = API_CONFIG.endpoints['wb/price-history'];
         const url = `${endpoint.url}/${endpoint.transform(nm)}`;
         
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Ошибка получения истории цен: ${response.status}`);
-        }
+        console.log('Price history URL:', url);
+        
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    // Если история цен не найдена, возвращаем пустой массив
+                    return { data: [] };
+                }
+                throw new Error(`Ошибка получения истории цен: ${response.status}`);
+            }
 
-        return response.json();
+            const data = await response.json();
+            return { data };
+        } catch (error) {
+            console.error('Price history error:', error);
+            // Если произошла ошибка, возвращаем пустой массив
+            return { data: [] };
+        }
     },
 
     async 'api/stats'(params) {

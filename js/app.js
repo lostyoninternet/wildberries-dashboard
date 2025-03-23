@@ -97,13 +97,18 @@ const apiClient = {
     
     // Получение истории цен
     async getPriceHistory(articleNumber) {
-        const response = await this.request('wb/price-history', {
-            nm: articleNumber
-        });
-        
-        return {
-            history: response.data || []
-        };
+        try {
+            const response = await this.request('wb/price-history', {
+                nm: articleNumber
+            });
+            
+            return {
+                history: response.data || []
+            };
+        } catch (error) {
+            console.warn('Failed to fetch price history:', error);
+            return { history: [] };
+        }
     },
     
     // Получение статистики продаж

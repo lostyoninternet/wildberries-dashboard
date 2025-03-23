@@ -59,17 +59,37 @@ const apiClient = {
         const response = await fetch(`${API_CONFIG.baseUrl}?${queryParams}`);
         
         if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
+            const errorText = await response.text();
+            throw new Error(`API error: ${response.status} - ${errorText}`);
         }
         
-        return response.json();
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        return data;
     },
     
     // Получение информации о товаре
     async getProduct(articleNumber) {
-        return this.request('/content/v2/get/cards/list', {
+        const response = await this.request('/content/v2/get/cards/list', {
             nm: articleNumber
         });
+        
+        if (!response.data || !response.data.cards || response.data.cards.length === 0) {
+            throw new Error('Товар не найден');
+        }
+        
+        const card = response.data.cards[0];
+        return {
+            nmId: card.nmID,
+            name: card.title,
+            brand: card.brand,
+            category: card.category,
+            price: card.price,
+            discount: card.discount || 0
+        };
     },
     
     // Получение статистики продаж
@@ -78,18 +98,27 @@ const apiClient = {
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - API_CONFIG.defaultDateRange);
         
-        return this.request('/api/v1/supplier/sales', {
+        const response = await this.request('/api/v1/supplier/sales', {
             nm: articleNumber,
             dateFrom: startDate.toISOString().split('T')[0],
             dateTo: endDate.toISOString().split('T')[0]
         });
+        
+        return {
+            totalSales: response.data.sales,
+            history: response.data.history || []
+        };
     },
     
     // Получение информации об остатках
     async getStocks(articleNumber) {
-        return this.request('/api/v1/supplier/stocks', {
+        const response = await this.request('/api/v1/supplier/stocks', {
             nm: articleNumber
         });
+        
+        return {
+            stock: response.data.stock || 0
+        };
     }
 };
 
@@ -329,22 +358,23 @@ async function init() {
             
             // Обновляем графики
             chartManager.createPriceChart({
-                dates: productData.priceHistory.map(item => item.date),
-                prices: productData.priceHistory.map(item => item.price),
-                discounts: productData.priceHistory.map(item => item.discount)
+                dates: productData.priceHistory?.map(item => item.date) || [],
+                prices: productData.priceHistory?.map(item => item.price) || [],
+                discounts: productData.priceHistory?.map(item => item.discount) || []
             });
             
             chartManager.createSalesChart({
-                dates: salesData.history.map(item => item.date),
-                sales: salesData.history.map(item => item.sales)
+                dates: salesData.history?.map(item => item.date) || [],
+                sales: salesData.history?.map(item => item.sales) || []
             });
             
             // Обновляем таблицы
-            uiManager.updatePriceHistory(productData.priceHistory);
-            uiManager.updateSalesHistory(salesData.history);
+            uiManager.updatePriceHistory(productData.priceHistory || []);
+            uiManager.updateSalesHistory(salesData.history || []);
             
         } catch (error) {
             uiManager.showError(error.message);
+            console.error('Error:', error);
         } finally {
             uiManager.hideLoader();
         }

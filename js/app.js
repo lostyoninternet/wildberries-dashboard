@@ -1,161 +1,355 @@
-// Constants
-const API_URL = 'https://suppliers-api.wildberries.ru';
-const PROXY_URL = 'https://cloudflare-workerjs.jaba-valerievna.workers.dev';
+// Конфигурация
+const API_CONFIG = {
+    baseUrl: 'https://cloudflare-workerjs.jaba-valerievna.workers.dev',
+    defaultDateRange: 30 // дней
+};
 
-// Загрузка токена
-let TOKEN = localStorage.getItem('wb_api_token');
+// Форматирование
+const formatters = {
+    date: new Intl.DateTimeFormat('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+    }),
+    
+    currency: new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }),
+    
+    number: new Intl.NumberFormat('ru-RU', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    })
+};
 
-// DOM Elements
-const searchForm = document.getElementById('search-form');
-const articleInput = document.getElementById('article-input');
-const searchButton = document.getElementById('search-button');
-const loader = document.getElementById('loader');
-const welcomeScreen = document.getElementById('welcome-screen');
-const errorMessage = document.getElementById('error-message');
-const errorText = document.getElementById('error-text');
-const productInfo = document.getElementById('product-info');
-
-// Проверяем наличие токена
-if (!TOKEN) {
-    TOKEN = prompt('Пожалуйста, введите ваш API токен Wildberries:');
-    if (TOKEN) {
-        localStorage.setItem('wb_api_token', TOKEN);
-    }
-}
-
-// Event Listeners
-searchForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    searchProduct();
-});
-
-searchButton.addEventListener('click', function(e) {
-    e.preventDefault();
-    searchProduct();
-});
-
-// Functions
-async function searchProduct() {
-    const article = articleInput.value.trim();
-    if (!article) {
-        showError('Введите артикул товара');
-        return;
-    }
-
-    showLoader();
-    try {
-        const productData = await getProductInfo(article);
-        showProductInfo(productData);
-    } catch (error) {
-        showError('Ошибка получения данных о товаре: ' + error.message);
-    }
-    hideLoader();
-}
-
-async function getProductInfo(articleNumber) {
-    try {
-        // Получаем основную информацию о товаре
-        const cardResponse = await fetch(`${PROXY_URL}?path=wb/card&nm=${articleNumber}`);
-        if (!cardResponse.ok) {
-            throw new Error(`HTTP error! status: ${cardResponse.status}`);
+// Управление API ключом
+const apiKeyManager = {
+    storageKey: 'wb_api_key',
+    
+    get: function() {
+        return localStorage.getItem(this.storageKey);
+    },
+    
+    set: function(key) {
+        localStorage.setItem(this.storageKey, key);
+    },
+    
+    check: function() {
+        const key = this.get();
+        if (!key) {
+            throw new Error('API ключ не найден. Пожалуйста, введите ваш API ключ.');
         }
-        const cardData = await cardResponse.json();
-        console.log('Card API Response:', cardData);
+        return key;
+    }
+};
+
+// API клиент
+const apiClient = {
+    async request(path, params = {}) {
+        const apiKey = apiKeyManager.check();
+        const queryParams = new URLSearchParams({
+            ...params,
+            path,
+            key: apiKey
+        });
         
-        if (!cardData || !cardData.data || !cardData.data.products || cardData.data.products.length === 0) {
-            throw new Error('Товар не найден');
+        const response = await fetch(`${API_CONFIG.baseUrl}?${queryParams}`);
+        
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
         }
+        
+        return response.json();
+    },
+    
+    // Получение информации о товаре
+    async getProduct(articleNumber) {
+        return this.request('/content/v2/get/cards/list', {
+            nm: articleNumber
+        });
+    },
+    
+    // Получение статистики продаж
+    async getSalesStats(articleNumber) {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - API_CONFIG.defaultDateRange);
+        
+        return this.request('/api/v1/supplier/sales', {
+            nm: articleNumber,
+            dateFrom: startDate.toISOString().split('T')[0],
+            dateTo: endDate.toISOString().split('T')[0]
+        });
+    },
+    
+    // Получение информации об остатках
+    async getStocks(articleNumber) {
+        return this.request('/api/v1/supplier/stocks', {
+            nm: articleNumber
+        });
+    }
+};
 
-        // Получаем историю цен
-        const historyResponse = await fetch(`${PROXY_URL}?path=wb/price-history&nm=${articleNumber}`);
-        let priceHistory = [];
-        if (historyResponse.ok) {
-            const historyData = await historyResponse.json();
-            console.log('History API Response:', historyData);
-            if (Array.isArray(historyData)) {
-                priceHistory = historyData;
+// Управление графиками
+const chartManager = {
+    priceChart: null,
+    salesChart: null,
+    
+    createPriceChart(data) {
+        const ctx = document.getElementById('price-chart').getContext('2d');
+        
+        if (this.priceChart) {
+            this.priceChart.destroy();
+        }
+        
+        this.priceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.dates,
+                datasets: [
+                    {
+                        label: 'Цена',
+                        data: data.prices,
+                        borderColor: '#cb11ab',
+                        backgroundColor: 'rgba(203, 17, 171, 0.1)',
+                        fill: true
+                    },
+                    {
+                        label: 'Скидка %',
+                        data: data.discounts,
+                        borderColor: '#2196f3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        fill: true,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Цена (₽)'
+                        }
+                    },
+                    y1: {
+                        beginAtZero: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Скидка (%)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
             }
-        }
-
-        const product = cardData.data.products[0];
-        return {
-            nmID: product.id,
-            title: product.name || 'Нет данных',
-            brand: product.brand || 'Нет данных',
-            price: product.salePriceU ? (product.salePriceU / 100) : 0,
-            discount: product.sale || 0,
-            priceHistory: priceHistory
-        };
-    } catch (error) {
-        console.error('Error fetching product info:', error);
-        throw error;
-    }
-}
-
-function showProductInfo(data) {
-    welcomeScreen.style.display = 'none';
-    errorMessage.style.display = 'none';
-    productInfo.style.display = 'block';
-
-    // Форматируем данные для отображения
-    let historyHtml = '';
-    if (data.priceHistory && data.priceHistory.length > 0) {
-        // Сортируем историю цен по дате (от новых к старым)
-        const sortedHistory = [...data.priceHistory].sort((a, b) => b.dt - a.dt);
+        });
+    },
+    
+    createSalesChart(data) {
+        const ctx = document.getElementById('sales-chart').getContext('2d');
         
-        historyHtml = `
-            <div class="price-history">
-                <h3>История цен</h3>
-                <table class="price-table">
-                    <thead>
-                        <tr>
-                            <th>Дата</th>
-                            <th>Цена</th>
-                            <th>Скидка</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${sortedHistory.map(item => `
-                            <tr>
-                                <td>${new Date(item.dt * 1000).toLocaleDateString()}</td>
-                                <td>${(item.price / 100).toFixed(2)} ₽</td>
-                                <td>${item.discount || 0}%</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+        if (this.salesChart) {
+            this.salesChart.destroy();
+        }
+        
+        this.salesChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.dates,
+                datasets: [
+                    {
+                        label: 'Продажи',
+                        data: data.sales,
+                        backgroundColor: 'rgba(203, 17, 171, 0.7)'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Количество продаж'
+                        }
+                    }
+                }
+            }
+        });
+    }
+};
+
+// UI менеджер
+const uiManager = {
+    elements: {
+        apiKeyInput: document.getElementById('api-key'),
+        searchForm: document.getElementById('search-form'),
+        articleInput: document.getElementById('article-input'),
+        searchButton: document.getElementById('search-button'),
+        loader: document.getElementById('loader'),
+        errorMessage: document.getElementById('error-message'),
+        productSection: document.getElementById('product-section'),
+        productInfo: document.getElementById('product-info'),
+        productStats: document.getElementById('product-stats'),
+        priceHistoryTable: document.getElementById('price-history-table').querySelector('tbody'),
+        salesHistoryTable: document.getElementById('sales-history-table').querySelector('tbody')
+    },
+    
+    showLoader() {
+        this.elements.loader.style.display = 'block';
+        this.elements.searchButton.disabled = true;
+    },
+    
+    hideLoader() {
+        this.elements.loader.style.display = 'none';
+        this.elements.searchButton.disabled = false;
+    },
+    
+    showError(message) {
+        this.elements.errorMessage.textContent = message;
+        this.elements.errorMessage.style.display = 'block';
+        this.elements.productSection.style.display = 'none';
+    },
+    
+    hideError() {
+        this.elements.errorMessage.style.display = 'none';
+    },
+    
+    showProductSection() {
+        this.elements.productSection.style.display = 'block';
+    },
+    
+    updateProductInfo(data) {
+        this.elements.productInfo.innerHTML = `
+            <p><strong>Артикул:</strong> ${data.nmId}</p>
+            <p><strong>Название:</strong> ${data.name}</p>
+            <p><strong>Бренд:</strong> ${data.brand}</p>
+            <p><strong>Категория:</strong> ${data.category}</p>
+        `;
+    },
+    
+    updateProductStats(data) {
+        this.elements.productStats.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value">${formatters.currency.format(data.currentPrice)}</div>
+                <div>Текущая цена</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${data.discount}%</div>
+                <div>Скидка</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${formatters.number.format(data.totalSales)}</div>
+                <div>Всего продаж</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${formatters.number.format(data.currentStock)}</div>
+                <div>Остаток</div>
             </div>
         `;
-    } else {
-        historyHtml = '<p>История цен недоступна</p>';
+    },
+    
+    updatePriceHistory(data) {
+        this.elements.priceHistoryTable.innerHTML = data.map(item => `
+            <tr>
+                <td>${formatters.date.format(new Date(item.date))}</td>
+                <td>${formatters.currency.format(item.price)}</td>
+                <td>${item.discount}%</td>
+                <td>${formatters.currency.format(item.promoPrice)}</td>
+            </tr>
+        `).join('');
+    },
+    
+    updateSalesHistory(data) {
+        this.elements.salesHistoryTable.innerHTML = data.map(item => `
+            <tr>
+                <td>${formatters.date.format(new Date(item.date))}</td>
+                <td>${formatters.number.format(item.sales)}</td>
+                <td>${formatters.currency.format(item.revenue)}</td>
+                <td>${formatters.number.format(item.stock)}</td>
+            </tr>
+        `).join('');
     }
+};
 
-    productInfo.innerHTML = `
-        <h2>Информация о товаре</h2>
-        <div class="product-details">
-            <p><strong>Артикул:</strong> ${data.nmID}</p>
-            <p><strong>Название:</strong> ${data.title}</p>
-            <p><strong>Бренд:</strong> ${data.brand}</p>
-            <p><strong>Текущая цена:</strong> ${data.price} ₽</p>
-            <p><strong>Скидка:</strong> ${data.discount}%</p>
-        </div>
-        ${historyHtml}
-    `;
+// Инициализация приложения
+async function init() {
+    // Загрузка API ключа из localStorage
+    const savedApiKey = apiKeyManager.get();
+    if (savedApiKey) {
+        uiManager.elements.apiKeyInput.value = savedApiKey;
+    }
+    
+    // Обработчик изменения API ключа
+    uiManager.elements.apiKeyInput.addEventListener('change', (e) => {
+        apiKeyManager.set(e.target.value.trim());
+    });
+    
+    // Обработчик формы поиска
+    uiManager.elements.searchForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const articleNumber = uiManager.elements.articleInput.value.trim();
+        if (!articleNumber) {
+            uiManager.showError('Введите артикул товара');
+            return;
+        }
+        
+        try {
+            uiManager.hideError();
+            uiManager.showLoader();
+            
+            // Получаем данные о товаре
+            const productData = await apiClient.getProduct(articleNumber);
+            const salesData = await apiClient.getSalesStats(articleNumber);
+            const stocksData = await apiClient.getStocks(articleNumber);
+            
+            // Обновляем UI
+            uiManager.showProductSection();
+            uiManager.updateProductInfo(productData);
+            uiManager.updateProductStats({
+                currentPrice: productData.price,
+                discount: productData.discount,
+                totalSales: salesData.totalSales,
+                currentStock: stocksData.stock
+            });
+            
+            // Обновляем графики
+            chartManager.createPriceChart({
+                dates: productData.priceHistory.map(item => item.date),
+                prices: productData.priceHistory.map(item => item.price),
+                discounts: productData.priceHistory.map(item => item.discount)
+            });
+            
+            chartManager.createSalesChart({
+                dates: salesData.history.map(item => item.date),
+                sales: salesData.history.map(item => item.sales)
+            });
+            
+            // Обновляем таблицы
+            uiManager.updatePriceHistory(productData.priceHistory);
+            uiManager.updateSalesHistory(salesData.history);
+            
+        } catch (error) {
+            uiManager.showError(error.message);
+        } finally {
+            uiManager.hideLoader();
+        }
+    });
 }
 
-function showError(message) {
-    welcomeScreen.style.display = 'none';
-    productInfo.style.display = 'none';
-    errorMessage.style.display = 'block';
-    errorText.textContent = message;
-}
-
-function showLoader() {
-    loader.style.display = 'block';
-    searchButton.disabled = true;
-}
-
-function hideLoader() {
-    loader.style.display = 'none';
-    searchButton.disabled = false;
-}
+// Запуск приложения
+init();

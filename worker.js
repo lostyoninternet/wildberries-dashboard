@@ -1,29 +1,20 @@
 // Конфигурация API
 const API_CONFIG = {
-    baseUrl: 'https://suppliers-api.wildberries.ru',
-    contentUrl: 'https://content-suppliers.wildberries.ru',
     endpoints: {
-        '/content/v2/get/cards/list': {
-            url: 'https://content-suppliers.wildberries.ru/content/v2/get/cards/list',
-            method: 'POST',
-            headers: (key) => ({
-                'Content-Type': 'application/json',
-                'Authorization': key
-            })
+        'wb/card': {
+            url: 'https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=0',
+            method: 'GET',
+            transform: (nm) => `&nm=${nm}`
         },
-        '/api/v1/supplier/sales': {
-            url: 'https://suppliers-api.wildberries.ru/api/v1/supplier/sales',
+        'wb/price-history': {
+            url: 'https://basket-10.wb.ru/vol',
+            method: 'GET',
+            transform: (nm) => `${Math.floor(nm / 100000)}/part${Math.floor(nm / 1000)}/cards/${nm}.json`
+        },
+        'api/stats': {
+            url: 'https://statistics-api.wildberries.ru/api/v1/supplier/sales',
             method: 'GET',
             headers: (key) => ({
-                'Content-Type': 'application/json',
-                'Authorization': key
-            })
-        },
-        '/api/v1/supplier/stocks': {
-            url: 'https://suppliers-api.wildberries.ru/api/v1/supplier/stocks',
-            method: 'GET',
-            headers: (key) => ({
-                'Content-Type': 'application/json',
                 'Authorization': key
             })
         }
@@ -42,7 +33,7 @@ const apiUtils = {
     // Проверка и форматирование API ключа
     validateApiKey(key) {
         if (!key || typeof key !== 'string') {
-            throw new Error('API ключ обязателен');
+            throw new Error('API ключ обязателен для этого запроса');
         }
         return key.trim();
     },
@@ -59,6 +50,85 @@ const apiUtils = {
                 ...corsHeaders
             }
         });
+    },
+
+    // Форматирование ответа
+    formatResponse(data) {
+        return new Response(JSON.stringify(data), {
+            headers: {
+                'Content-Type': 'application/json',
+                ...corsHeaders
+            }
+        });
+    }
+};
+
+// Обработчики различных типов запросов
+const handlers = {
+    async 'wb/card'(params) {
+        const { nm } = params;
+        if (!nm) {
+            throw new Error('Параметр nm обязателен');
+        }
+
+        const endpoint = API_CONFIG.endpoints['wb/card'];
+        const url = `${endpoint.url}${endpoint.transform(nm)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Ошибка получения карточки товара: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data.data || !data.data.products || data.data.products.length === 0) {
+            throw new Error('Товар не найден');
+        }
+
+        return data;
+    },
+
+    async 'wb/price-history'(params) {
+        const { nm } = params;
+        if (!nm) {
+            throw new Error('Параметр nm обязателен');
+        }
+
+        const endpoint = API_CONFIG.endpoints['wb/price-history'];
+        const url = `${endpoint.url}/${endpoint.transform(nm)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Ошибка получения истории цен: ${response.status}`);
+        }
+
+        return response.json();
+    },
+
+    async 'api/stats'(params) {
+        const { key, nm, dateFrom, dateTo } = params;
+        
+        // Для статистики нужен API ключ
+        apiUtils.validateApiKey(key);
+        
+        if (!nm || !dateFrom || !dateTo) {
+            throw new Error('Параметры nm, dateFrom и dateTo обязательны');
+        }
+
+        const endpoint = API_CONFIG.endpoints['api/stats'];
+        const url = new URL(endpoint.url);
+        url.searchParams.set('nm', nm);
+        url.searchParams.set('dateFrom', dateFrom);
+        url.searchParams.set('dateTo', dateTo);
+
+        const response = await fetch(url.toString(), {
+            headers: endpoint.headers(key)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ошибка получения статистики: ${response.status}`);
+        }
+
+        return response.json();
     }
 };
 
@@ -75,72 +145,31 @@ async function handleRequest(request) {
         // Получаем параметры запроса
         const url = new URL(request.url);
         const path = url.searchParams.get('path');
-        const apiKey = url.searchParams.get('key');
-        const nm = url.searchParams.get('nm');
 
-        // Проверяем обязательные параметры
+        // Проверяем наличие пути
         if (!path) {
             throw new Error('Параметр path обязателен');
         }
-        if (!apiKey) {
-            throw new Error('Параметр key обязателен');
-        }
-        if (!nm) {
-            throw new Error('Параметр nm обязателен');
-        }
 
-        // Получаем конфигурацию эндпоинта
-        const endpoint = API_CONFIG.endpoints[path];
-        if (!endpoint) {
-            throw new Error('Неизвестный эндпоинт: ' + path);
+        // Проверяем существование обработчика
+        const handler = handlers[path];
+        if (!handler) {
+            throw new Error(`Неизвестный путь: ${path}`);
         }
 
-        // Формируем параметры запроса
-        let apiUrl = new URL(endpoint.url);
-        let requestParams = {
-            method: endpoint.method,
-            headers: endpoint.headers(apiKey)
-        };
-
-        // Подготавливаем данные в зависимости от метода
-        if (endpoint.method === 'POST') {
-            if (path === '/content/v2/get/cards/list') {
-                requestParams.body = JSON.stringify({
-                    vendorCodes: [nm]
-                });
-            }
-        } else if (endpoint.method === 'GET') {
-            // Добавляем параметры для GET запросов
-            apiUrl.searchParams.set('nm', nm);
-            
-            // Копируем остальные параметры
-            for (const [key, value] of url.searchParams.entries()) {
-                if (!['path', 'key', 'nm'].includes(key)) {
-                    apiUrl.searchParams.set(key, value);
-                }
+        // Собираем все параметры запроса
+        const params = {};
+        for (const [key, value] of url.searchParams) {
+            if (key !== 'path') {
+                params[key] = value;
             }
         }
 
-        console.log('Sending request to:', apiUrl.toString());
-        console.log('Request params:', JSON.stringify(requestParams));
-
-        // Выполняем запрос к API
-        const response = await fetch(apiUrl.toString(), requestParams);
+        // Выполняем запрос через соответствующий обработчик
+        const data = await handler(params);
         
-        if (!response.ok) {
-            throw new Error(`API returned ${response.status}: ${await response.text()}`);
-        }
-
-        const data = await response.json();
-        console.log('API Response:', JSON.stringify(data).slice(0, 200));
-
         // Возвращаем результат
-        return new Response(JSON.stringify(data), {
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-            }
-        });
+        return apiUtils.formatResponse(data);
 
     } catch (error) {
         return apiUtils.handleApiError(error);

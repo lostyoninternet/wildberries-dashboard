@@ -49,12 +49,15 @@ const apiKeyManager = {
 // API клиент
 const apiClient = {
     async request(path, params = {}) {
-        const apiKey = apiKeyManager.check();
         const queryParams = new URLSearchParams({
             ...params,
-            path,
-            key: apiKey
+            path
         });
+
+        // Добавляем API ключ только для запросов к API статистики
+        if (path.startsWith('api/')) {
+            queryParams.set('key', apiKeyManager.check());
+        }
         
         const response = await fetch(`${API_CONFIG.baseUrl}?${queryParams}`);
         
@@ -73,22 +76,33 @@ const apiClient = {
     
     // Получение информации о товаре
     async getProduct(articleNumber) {
-        const response = await this.request('/content/v2/get/cards/list', {
+        const response = await this.request('wb/card', {
             nm: articleNumber
         });
         
-        if (!response.data || !response.data.cards || response.data.cards.length === 0) {
+        if (!response.data || !response.data.products || response.data.products.length === 0) {
             throw new Error('Товар не найден');
         }
         
-        const card = response.data.cards[0];
+        const product = response.data.products[0];
         return {
-            nmId: card.nmID,
-            name: card.title,
-            brand: card.brand,
-            category: card.category,
-            price: card.price,
-            discount: card.discount || 0
+            nmId: product.id,
+            name: product.name,
+            brand: product.brand,
+            category: product.subjectName,
+            price: product.salePriceU / 100,
+            discount: product.sale || 0
+        };
+    },
+    
+    // Получение истории цен
+    async getPriceHistory(articleNumber) {
+        const response = await this.request('wb/price-history', {
+            nm: articleNumber
+        });
+        
+        return {
+            history: response.data || []
         };
     },
     
@@ -98,26 +112,15 @@ const apiClient = {
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - API_CONFIG.defaultDateRange);
         
-        const response = await this.request('/api/v1/supplier/sales', {
+        const response = await this.request('api/stats', {
             nm: articleNumber,
             dateFrom: startDate.toISOString().split('T')[0],
             dateTo: endDate.toISOString().split('T')[0]
         });
         
         return {
-            totalSales: response.data.sales,
+            totalSales: response.data.sales || 0,
             history: response.data.history || []
-        };
-    },
-    
-    // Получение информации об остатках
-    async getStocks(articleNumber) {
-        const response = await this.request('/api/v1/supplier/stocks', {
-            nm: articleNumber
-        });
-        
-        return {
-            stock: response.data.stock || 0
         };
     }
 };
@@ -285,7 +288,7 @@ const uiManager = {
                 <div>Всего продаж</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">${formatters.number.format(data.currentStock)}</div>
+                <div class="stat-value">${formatters.number.format(data.currentStock || 0)}</div>
                 <div>Остаток</div>
             </div>
         `;
@@ -294,10 +297,10 @@ const uiManager = {
     updatePriceHistory(data) {
         this.elements.priceHistoryTable.innerHTML = data.map(item => `
             <tr>
-                <td>${formatters.date.format(new Date(item.date))}</td>
-                <td>${formatters.currency.format(item.price)}</td>
-                <td>${item.discount}%</td>
-                <td>${formatters.currency.format(item.promoPrice)}</td>
+                <td>${formatters.date.format(new Date(item.dt * 1000))}</td>
+                <td>${formatters.currency.format(item.price / 100)}</td>
+                <td>${item.discount || 0}%</td>
+                <td>${formatters.currency.format((item.price * (100 - (item.discount || 0))) / 10000)}</td>
             </tr>
         `).join('');
     },
@@ -308,7 +311,7 @@ const uiManager = {
                 <td>${formatters.date.format(new Date(item.date))}</td>
                 <td>${formatters.number.format(item.sales)}</td>
                 <td>${formatters.currency.format(item.revenue)}</td>
-                <td>${formatters.number.format(item.stock)}</td>
+                <td>${formatters.number.format(item.stock || 0)}</td>
             </tr>
         `).join('');
     }
@@ -342,9 +345,11 @@ async function init() {
             uiManager.showLoader();
             
             // Получаем данные о товаре
-            const productData = await apiClient.getProduct(articleNumber);
-            const salesData = await apiClient.getSalesStats(articleNumber);
-            const stocksData = await apiClient.getStocks(articleNumber);
+            const [productData, priceHistory, salesData] = await Promise.all([
+                apiClient.getProduct(articleNumber),
+                apiClient.getPriceHistory(articleNumber),
+                apiClient.getSalesStats(articleNumber)
+            ]);
             
             // Обновляем UI
             uiManager.showProductSection();
@@ -353,24 +358,24 @@ async function init() {
                 currentPrice: productData.price,
                 discount: productData.discount,
                 totalSales: salesData.totalSales,
-                currentStock: stocksData.stock
+                currentStock: 0 // У нас нет доступа к API остатков
             });
             
             // Обновляем графики
             chartManager.createPriceChart({
-                dates: productData.priceHistory?.map(item => item.date) || [],
-                prices: productData.priceHistory?.map(item => item.price) || [],
-                discounts: productData.priceHistory?.map(item => item.discount) || []
+                dates: priceHistory.history.map(item => formatters.date.format(new Date(item.dt * 1000))),
+                prices: priceHistory.history.map(item => item.price / 100),
+                discounts: priceHistory.history.map(item => item.discount || 0)
             });
             
             chartManager.createSalesChart({
-                dates: salesData.history?.map(item => item.date) || [],
-                sales: salesData.history?.map(item => item.sales) || []
+                dates: salesData.history.map(item => formatters.date.format(new Date(item.date))),
+                sales: salesData.history.map(item => item.sales)
             });
             
             // Обновляем таблицы
-            uiManager.updatePriceHistory(productData.priceHistory || []);
-            uiManager.updateSalesHistory(salesData.history || []);
+            uiManager.updatePriceHistory(priceHistory.history);
+            uiManager.updateSalesHistory(salesData.history);
             
         } catch (error) {
             uiManager.showError(error.message);
